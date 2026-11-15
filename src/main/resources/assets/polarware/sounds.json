@@ -1,0 +1,92 @@
+{
+  "keypress": {
+    "sounds": [
+      "polarware:keypress"
+    ]
+  },
+  "keyrelease": {
+    "sounds": [
+      "polarware:keyrelease"
+    ]
+  },
+  "uwu": {
+    "sounds": [
+      "polarware:uwu"
+    ]
+  },
+  "disable": {
+    "sounds": [
+      "polarware:disable"
+    ]
+  },
+  "enable": {
+    "sounds": [
+      "polarware:enable"
+    ]
+  },
+  "moan1": {
+    "sounds": [
+      "polarware:moan1"
+    ]
+  },
+  "moan2": {
+    "sounds": [
+      "polarware:moan2"
+    ]
+  },
+  "moan3": {
+    "sounds": [
+      "polarware:moan3"
+    ]
+  },
+  "moan4": {
+    "sounds": [
+      "polarware:moan4"
+    ]
+  },
+  "skeet": {
+    "sounds": [
+      "polarware:skeet"
+    ]
+  },
+  "orthodox": {
+    "sounds": [
+      "polarware:orthodox"
+    ]
+  },
+  "boolean": {
+    "sounds": [
+      "polarware:boolean"
+    ]
+  },
+  "scroll": {
+    "sounds": [
+      "polarware:scroll"
+    ]
+  },
+  "swipein": {
+    "sounds": [
+      "polarware:swipein"
+    ]
+  },
+  "swipeout": {
+    "sounds": [
+      "polarware:swipeout"
+    ]
+  },
+  "pmsound": {
+    "sounds": [
+      "polarware:pmsound"
+    ]
+  },
+  "rifk": {
+    "sounds": [
+      "polarware:rifk"
+    ]
+  },
+  "cutie": {
+    "sounds": [
+      "polarware:cutie"
+    ]
+  }
+}
