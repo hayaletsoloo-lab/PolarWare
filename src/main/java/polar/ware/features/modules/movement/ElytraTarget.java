@@ -1,10 +1,11 @@
-package polar.ware.features.modules.combat;
+package polar.ware.features.modules.movement;
 
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.FireworkRocketItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -17,6 +18,7 @@ import static polar.ware.utility.math.MathUtility.random;
 
 public class ElytraTarget extends Module {
 
+    public final Setting<Float>   range        = new Setting<>("Range",        100f, 10f, 300f);
     public final Setting<Float>   leadMult     = new Setting<>("LeadMult",     0.7f, 0.1f, 3.0f);
     public final Setting<Float>   delay        = new Setting<>("Delay",        5f,   1f,   20f);
     public final Setting<Rotations> rotations  = new Setting<>("Rotations",    Rotations.Sharp);
@@ -52,9 +54,8 @@ public class ElytraTarget extends Module {
         if (fullNullCheck()) return;
         if (!mc.player.isFallFlying()) return;
 
-        if (ModuleManager.aura == null || !ModuleManager.aura.isEnabled()) return;
-        var target = ModuleManager.aura.target;
-        if (!(target instanceof PlayerEntity)) return;
+        PlayerEntity target = findTarget();
+        if (target == null) return;
 
         long now = System.currentTimeMillis();
         if (now - lastFireworkMs < (long)(delay.getValue() * 100)) return;
@@ -104,7 +105,7 @@ public class ElytraTarget extends Module {
             );
         }
 
-        // ── Rotation ─────────────────────────────────────────────────────────
+        // ── Rotation hesapla ─────────────────────────────────────────────────
         double dx = leadPos.x - eyePos.x;
         double dy = leadPos.y - eyePos.y;
         double dz = leadPos.z - eyePos.z;
@@ -131,11 +132,16 @@ public class ElytraTarget extends Module {
         float safeYaw   = (float)(targetYaw   - (targetYaw   - mc.player.getYaw())   % gcd);
         float safePitch = (float)(targetPitch - (targetPitch - mc.player.getPitch()) % gcd);
 
-        // ── Silent fişek (Polar bypass) ──────────────────────────────────────
+        // ── Silent rotation packet ────────────────────────────────────────────
+        mc.player.networkHandler.sendPacket(
+            new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround())
+        );
+
+        // ── Fişek kullan ─────────────────────────────────────────────────────
         if (fireworkSlot < 9) {
             int prev = mc.player.getInventory().selectedSlot;
             mc.player.getInventory().selectedSlot = fireworkSlot;
-            sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
+            sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id));
             mc.player.getInventory().selectedSlot = prev;
         } else {
             int hotbarSlot = mc.player.getInventory().selectedSlot;
@@ -145,7 +151,7 @@ public class ElytraTarget extends Module {
                 net.minecraft.screen.slot.SlotActionType.SWAP,
                 mc.player
             );
-            sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
+            sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id));
             mc.interactionManager.clickSlot(
                 mc.player.currentScreenHandler.syncId,
                 fireworkSlot, hotbarSlot,
@@ -155,6 +161,21 @@ public class ElytraTarget extends Module {
         }
 
         lastFireworkMs = System.currentTimeMillis();
+    }
+
+    private PlayerEntity findTarget() {
+        PlayerEntity closest = null;
+        double closestDist = range.getValue() * range.getValue();
+        for (PlayerEntity p : mc.world.getPlayers()) {
+            if (p == mc.player) continue;
+            if (ModuleManager.friendManager.isFriend(p.getName().getString())) continue;
+            double dist = mc.player.squaredDistanceTo(p);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closest = p;
+            }
+        }
+        return closest;
     }
 
     private int findFireworkSlot() {
