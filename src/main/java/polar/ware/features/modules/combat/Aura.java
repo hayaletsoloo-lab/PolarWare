@@ -100,7 +100,7 @@ public class Aura extends Module {
     public final Setting<Boolean> elytraTarget = new Setting<>("ElytraTarget", true);
 
     public final Setting<SettingGroup> advanced = new Setting<>("Advanced", new SettingGroup(false, 0));
-    public final Setting<Float> aimRange = new Setting<>("AimRange", 3.1f, 0f, 6.0f).addToGroup(advanced);
+    public final Setting<Float> aimRange = new Setting<>("AimRange", 3.1f, 0f, 48.0f).addToGroup(advanced);
     public final Setting<Boolean> randomHitDelay = new Setting<>("RandomHitDelay", false).addToGroup(advanced);
     public final Setting<Boolean> pauseInInventory = new Setting<>("PauseInInventory", true).addToGroup(advanced);
     public final Setting<Boolean> dropSprint = new Setting<>("DropSprint", true).addToGroup(advanced);
