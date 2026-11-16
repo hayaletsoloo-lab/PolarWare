@@ -3,8 +3,11 @@ package polar.ware.features.modules.movement;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.AxeItem;
 import net.minecraft.item.FireworkRocketItem;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.SwordItem;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
@@ -18,12 +21,16 @@ import polar.ware.core.manager.client.ModuleManager;
 import polar.ware.setting.Setting;
 
 public class ElytraTarget extends Module {
-
-    // ── Ayarlar ──
     public final Setting<Boolean> autofw = new Setting<>("AutoFW", true);
+    public final Setting<FWMode> fwMode = new Setting<>("FWMode", FWMode.Swap);
+    public final Setting<Boolean> autoTarget = new Setting<>("AutoTarget", true);
     public final Setting<Integer> delay = new Setting<>("Delay", 5, 1, 20);
-    public final Setting<Float> predict = new Setting<>("Predict", 1.0f, 0.5f, 4.0f);
+    public final Setting<Float> predict = new Setting<>("Predict", 1.5f, 0.5f, 4.0f);
+    public final Setting<Float> aimRange = new Setting<>("AimRange", 50f, 20f, 64f);
     public final Setting<Boolean> snap = new Setting<>("Snap", true);
+    public final Setting<Boolean> autoTakeoff = new Setting<>("AutoTakeoff", false);
+
+    public enum FWMode { Silent, Swap }
 
     private int fireworkTicks = 0;
     private int currentDelay = 5;
@@ -42,66 +49,93 @@ public class ElytraTarget extends Module {
 
     @EventHandler
     public void onUpdate(PlayerUpdateEvent e) {
-        if (!mc.player.isFallFlying() || mc.currentScreen != null) return;
+        if (fullNullCheck() || mc.currentScreen != null) return;
 
+        if (autoTakeoff.getValue() && !mc.player.isFallFlying() && mc.options.jumpKey.isPressed()) {
+            mc.player.startFallFlying();
+            sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+        }
+
+        if (!mc.player.isFallFlying()) return;
         fireworkTicks++;
-        Entity target = ModuleManager.aura.target;
-        if (!(target instanceof PlayerEntity p) || !p.isAlive()) return;
 
-        // ── HIZ TAHMİNİ (PREDICT) ──
-        velHistory[velIndex % 5] = p.getVelocity();
-        velIndex++;
-        double svx = 0, svy = 0, svz = 0;
-        for (Vec3d v : velHistory) { svx += v.x; svy += v.y; svz += v.z; }
-        Vec3d smoothVel = new Vec3d(svx / 5, svy / 5, svz / 5);
+        PlayerEntity p = null;
+        if (autoTarget.getValue()) {
+            double closestDist = Double.MAX_VALUE;
+            for (Entity entity : mc.world.getEntities()) {
+                if (entity instanceof PlayerEntity player && player != mc.player && player.isAlive()) {
+                    double dist = mc.player.distanceTo(player);
+                    if (dist <= aimRange.getValue() && dist < closestDist) {
+                        closestDist = dist;
+                        p = player;
+                    }
+                }
+            }
+        } else if (ModuleManager.aura.target instanceof PlayerEntity auraTarget) {
+            p = auraTarget;
+        }
 
-        Vec3d targetCenter = p.getBoundingBox().getCenter();
-        Vec3d eyePos = mc.player.getEyePos();
-        double dist = eyePos.distanceTo(targetCenter);
-        
-        Vec3d leadPos = targetCenter.add(
-            smoothVel.x * (dist / 1.6) * predict.getValue(),
-            smoothVel.y * (dist / 1.6) * predict.getValue(),
-            smoothVel.z * (dist / 1.6) * predict.getValue()
-        );
+        if (p != null) {
+            double dist = mc.player.distanceTo(p);
+            velHistory[velIndex % 5] = p.getVelocity();
+            velIndex++;
+            double svx = 0, svy = 0, svz = 0;
+            for (Vec3d v : velHistory) { svx += v.x; svy += v.y; svz += v.z; }
+            Vec3d smoothVel = new Vec3d(svx / 5, svy / 5, svz / 5);
 
-        // ── SNAP (Ghost Hit Engeli) ──
-        Vec3d finalLookPos = (snap.getValue() && dist <= 3.5) ? targetCenter : leadPos;
-        double dx = finalLookPos.x - eyePos.x;
-        double dy = finalLookPos.y - eyePos.y;
-        double dz = finalLookPos.z - eyePos.z;
+            Vec3d targetCenter = p.getBoundingBox().getCenter();
+            Vec3d eyePos = mc.player.getEyePos();
+            
+            Vec3d leadPos = targetCenter.add(
+                smoothVel.x * (dist / 1.6) * predict.getValue(),
+                smoothVel.y * (dist / 1.6) * predict.getValue(),
+                smoothVel.z * (dist / 1.6) * predict.getValue()
+            );
 
-        float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90f;
-        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-        pitch = MathHelper.clamp(pitch, -90f, 90f);
+            Vec3d finalLookPos = (snap.getValue() && dist <= 3.5) ? targetCenter : leadPos;
+            double dx = finalLookPos.x - eyePos.x;
+            double dy = finalLookPos.y - eyePos.y;
+            double dz = finalLookPos.z - eyePos.z;
 
-        // ── GCD FIX (Polar Bypass) ──
-        double sens = mc.options.getMouseSensitivity().getValue();
-        double f = sens * 0.6 + 0.2;
-        double gcd = Math.pow(f, 3.0) * (8.0 / 3.0);
-        float safeYaw = (float) (yaw - (yaw - mc.player.getYaw()) % gcd);
-        float safePitch = (float) (pitch - (pitch - mc.player.getPitch()) % gcd);
+            float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90f;
+            float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+            pitch = MathHelper.clamp(pitch, -90f, 90f);
 
-        // ── ROTASYONU UYGULA VE PAKET GÖNDER (Polar Bypass) ──
-        mc.player.setYaw(safeYaw);
-        mc.player.setPitch(safePitch);
-        sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround()));
+            double sens = mc.options.getMouseSensitivity().getValue();
+            double f = sens * 0.6 + 0.2;
+            double gcd = Math.pow(f, 3.0) * (8.0 / 3.0);
+            float safeYaw = (float) (yaw - (yaw - mc.player.getYaw()) % gcd);
+            float safePitch = (float) (pitch - (pitch - mc.player.getPitch()) % gcd);
 
-        // ── FİŞEK BASMA (SILENT) ──
+            mc.player.setYaw(safeYaw);
+            mc.player.setPitch(safePitch);
+            sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround()));
+
+            if (fwMode.is(FWMode.Swap) && dist <= 3.5 && mc.player.getAttackCooldownProgress(0.5f) >= 0.92f) {
+                int swordSlot = findSwordSlot();
+                if (swordSlot != -1) {
+                    int prevSlot = mc.player.getInventory().selectedSlot;
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
+                    mc.interactionManager.attackEntity(mc.player, p);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
+                }
+            }
+        }
+
         if (autofw.getValue() && fireworkTicks >= currentDelay) {
             int fireworkSlot = findFireworkSlot();
             if (fireworkSlot != -1) {
+                int prevSlot = mc.player.getInventory().selectedSlot;
                 if (fireworkSlot < 9) {
                     sendPacket(new UpdateSelectedSlotC2SPacket(fireworkSlot));
-                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
-                    sendPacket(new UpdateSelectedSlotC2SPacket(mc.player.getInventory().selectedSlot));
+                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, mc.player.getYaw(), mc.player.getPitch()));
+                    mc.execute(() -> sendPacket(new UpdateSelectedSlotC2SPacket(prevSlot)));
                 } else {
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, mc.player.getInventory().selectedSlot, SlotActionType.SWAP, mc.player);
-                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, mc.player.getInventory().selectedSlot, SlotActionType.SWAP, mc.player);
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, prevSlot, SlotActionType.SWAP, mc.player);
+                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, mc.player.getYaw(), mc.player.getPitch()));
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, prevSlot, SlotActionType.SWAP, mc.player);
                 }
-                
-                // İnsanileştirilmiş gecikme
                 currentDelay = delay.getValue() + (int) (Math.random() * 3) - 1;
                 if (currentDelay < 1) currentDelay = 1;
                 fireworkTicks = 0;
@@ -110,13 +144,17 @@ public class ElytraTarget extends Module {
     }
 
     private int findFireworkSlot() {
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isEmpty() && stack.getItem() instanceof FireworkRocketItem) return i;
         }
-        for (int i = 9; i < 36; i++) {
+        return -1;
+    }
+
+    private int findSwordSlot() {
+        for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.getItem() instanceof FireworkRocketItem) return i;
+            if (!stack.isEmpty() && (stack.getItem() instanceof SwordItem || stack.getItem() instanceof AxeItem)) return i;
         }
         return -1;
     }
