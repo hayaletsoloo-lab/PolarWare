@@ -2,85 +2,81 @@ package polar.ware.features.modules.movement;
 
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.gui.screen.ingame.SignEditScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
-import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
+import polar.ware.events.impl.EventClickSlot;
 import polar.ware.events.impl.PacketEvent;
 import polar.ware.features.modules.Module;
 import polar.ware.setting.Setting;
+import polar.ware.utility.Timer;
+import polar.ware.utility.player.MovementUtility;
 
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class GuiMove extends Module {
     public GuiMove() {
         super("GuiMove", Category.MOVEMENT);
     }
 
+    private final Setting<Bypass> clickBypass = new Setting<>("Bypass", Bypass.None);
     private final Setting<Boolean> rotateOnArrows = new Setting<>("RotateOnArrows", true);
     private final Setting<Boolean> sneak = new Setting<>("sneak", false);
-    private final Setting<Boolean> disableRightClick = new Setting<>("NoRightClick", false);
 
-    // FunTime Bypass Değişkenleri
-    private final Queue<ClickSlotC2SPacket> funTimeQueue = new LinkedList<>();
-    private CloseHandledScreenC2SPacket queuedClose = null;
-    private int funTimeDelay = 0;
+    private final Queue<ClickSlotC2SPacket> storedClicks = new LinkedList<>();
+    private final AtomicBoolean pause = new AtomicBoolean();
+
+    // FunTime (ported from exosware GuiWalk)
+    private final Timer funTimer = new Timer();
+    private boolean wasInventoryOpen = false;
+    private boolean pendingFlush = false;
 
     @Override
     public void onUpdate() {
-        // [FUNTIME BYPASS] - Envanter kapandıktan sonra 0.5 saniye bekle
-        if (funTimeDelay > 0) {
-            funTimeDelay--;
-            
-            // Bekleme süresince hareketi tamamen engelle (Ayağın yere bassın)
-            mc.options.forwardKey.setPressed(false);
-            mc.options.backKey.setPressed(false);
-            mc.options.leftKey.setPressed(false);
-            mc.options.rightKey.setPressed(false);
-            mc.options.jumpKey.setPressed(false);
-            mc.options.sprintKey.setPressed(false);
-            
-            if (funTimeDelay == 0) {
-                // 0.5 saniye bitti, tıklamaları ve envanter kapatma paketini gönder
-                while (!funTimeQueue.isEmpty()) {
-                    sendPacket(funTimeQueue.poll());
-                }
-                if (queuedClose != null) {
-                    sendPacket(queuedClose);
-                    queuedClose = null;
-                }
-                
-                // [ÇÖZÜM BURADA] - Sunucu paketleri aldıktan sonra tuşları senin yerine tekrar bas
-                long handle = mc.getWindow().getHandle();
-                if (InputUtil.isKeyPressed(handle, mc.options.forwardKey.getDefaultKey().getCode())) mc.options.forwardKey.setPressed(true);
-                if (InputUtil.isKeyPressed(handle, mc.options.backKey.getDefaultKey().getCode())) mc.options.backKey.setPressed(true);
-                if (InputUtil.isKeyPressed(handle, mc.options.leftKey.getDefaultKey().getCode())) mc.options.leftKey.setPressed(true);
-                if (InputUtil.isKeyPressed(handle, mc.options.rightKey.getDefaultKey().getCode())) mc.options.rightKey.setPressed(true);
-                if (InputUtil.isKeyPressed(handle, mc.options.jumpKey.getDefaultKey().getCode())) mc.options.jumpKey.setPressed(true);
-                
-                // Eğer W'ye basılıyorsa direkt koşmayı (sprint) da geri aç
-                if (mc.options.forwardKey.isPressed() && !mc.player.isSneaking()) {
-                    mc.options.sprintKey.setPressed(true);
-                    mc.player.setSprinting(true);
-                }
+        if (clickBypass.is(Bypass.FunTime)) {
+            boolean inventoryOpen = mc.currentScreen instanceof InventoryScreen;
+            if (inventoryOpen) {
+                wasInventoryOpen = true;
+            } else if (wasInventoryOpen) {
+                wasInventoryOpen = false;
+                pendingFlush = true;
+                funTimer.reset();
             }
-            return;
+            if (pendingFlush && funTimer.passedMs(80)) {
+                pendingFlush = false;
+                flushStored();
+            }
         }
 
-        if (mc.currentScreen != null && !(mc.currentScreen instanceof ChatScreen)) {
-            for (KeyBinding k : new KeyBinding[]{mc.options.forwardKey, mc.options.backKey, mc.options.leftKey, mc.options.rightKey, mc.options.jumpKey, mc.options.sprintKey})
-                k.setPressed(isKeyPressed(InputUtil.fromTranslationKey(k.getBoundKeyTranslationKey()).getCode()));
+        if (mc.currentScreen != null && !(mc.currentScreen instanceof ChatScreen) && !(mc.currentScreen instanceof SignEditScreen)) {
+            KeyBinding[] keys = {mc.options.forwardKey, mc.options.backKey, mc.options.leftKey, mc.options.rightKey, mc.options.jumpKey, mc.options.sprintKey};
+            boolean funTimePause = clickBypass.is(Bypass.FunTime) && (pendingFlush || !storedClicks.isEmpty()) && !funTimer.passedMs(100);
+
+            for (KeyBinding k : keys)
+                k.setPressed(!funTimePause && isKeyPressed(InputUtil.fromTranslationKey(k.getBoundKeyTranslationKey()).getCode()));
 
             float deltaX = 0;
             float deltaY = 0;
 
             if (rotateOnArrows.getValue()) {
-                if (isKeyPressed(264)) deltaY += 30f;
-                if (isKeyPressed(265)) deltaY -= 30f;
-                if (isKeyPressed(262)) deltaX += 30f;
-                if (isKeyPressed(263)) deltaX -= 30f;
-                if (deltaX != 0 || deltaY != 0) mc.player.changeLookDirection(deltaX, deltaY);
+                if (isKeyPressed(264))
+                    deltaY += 30f;
+
+                if (isKeyPressed(265))
+                    deltaY -= 30f;
+
+                if (isKeyPressed(262))
+                    deltaX += 30f;
+
+                if (isKeyPressed(263))
+                    deltaX -= 30f;
+
+                if (deltaX != 0 || deltaY != 0)
+                    mc.player.changeLookDirection(deltaX, deltaY);
             }
 
             if (sneak.getValue())
@@ -89,25 +85,34 @@ public class GuiMove extends Module {
     }
 
     @EventHandler
+    public void onClickSlot(EventClickSlot e) {
+        if (clickBypass.is(Bypass.DisableClicks) && (MovementUtility.isMoving() || mc.options.jumpKey.isPressed()))
+            e.cancel();
+    }
+
+    @EventHandler
     public void onPacketSend(PacketEvent.Send e) {
-        if (e.getPacket() instanceof ClickSlotC2SPacket click) {
-            
-            // [NO RIGHT CLICK] - Sağ tık engeli
-            if (disableRightClick.getValue() && click.getButton() == 1) {
-                e.cancel();
-                return;
-            }
-
-            // [FUNTIME BYPASS] - Tıklamaları iptal et, kuyruğa ekle
-            funTimeQueue.add(click);
+        if (clickBypass.is(Bypass.FunTime) && e.getPacket() instanceof ClickSlotC2SPacket click && MovementUtility.isMoving() && !pause.get()) {
+            storedClicks.add(click);
             e.cancel();
         }
+    }
 
-        if (e.getPacket() instanceof CloseHandledScreenC2SPacket close) {
-            // [FUNTIME BYPASS] - Envanteri kapatma isteğini iptal et, 10 tick (0.5 saniye) geciktir
-            queuedClose = close;
-            e.cancel();
-            funTimeDelay = 10; 
-        }
+    private void flushStored() {
+        pause.set(true);
+        while (!storedClicks.isEmpty())
+            sendPacket(storedClicks.poll());
+        pause.set(false);
+    }
+
+    @Override
+    public void onDisable() {
+        storedClicks.clear();
+        pendingFlush = false;
+        wasInventoryOpen = false;
+    }
+
+    private enum Bypass {
+        None, FunTime, DisableClicks
     }
 }
