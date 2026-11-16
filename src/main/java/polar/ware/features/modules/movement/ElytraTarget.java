@@ -3,34 +3,25 @@ package polar.ware.features.modules.movement;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.AxeItem;
 import net.minecraft.item.FireworkRocketItem;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.SwordItem;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import polar.ware.events.impl.PlayerUpdateEvent;
 import polar.ware.features.modules.Module;
-import polar.ware.core.manager.client.ModuleManager;
 import polar.ware.setting.Setting;
 
 public class ElytraTarget extends Module {
     public final Setting<Boolean> autofw = new Setting<>("AutoFW", true);
-    public final Setting<FWMode> fwMode = new Setting<>("FWMode", FWMode.Swap);
-    public final Setting<Boolean> autoTarget = new Setting<>("AutoTarget", true);
     public final Setting<Integer> delay = new Setting<>("Delay", 5, 1, 20);
     public final Setting<Float> predict = new Setting<>("Predict", 1.5f, 0.5f, 4.0f);
     public final Setting<Float> aimRange = new Setting<>("AimRange", 50f, 20f, 64f);
     public final Setting<Boolean> snap = new Setting<>("Snap", true);
     public final Setting<Boolean> autoTakeoff = new Setting<>("AutoTakeoff", false);
-
-    public enum FWMode { Silent, Swap }
 
     private int fireworkTicks = 0;
     private int currentDelay = 5;
@@ -60,19 +51,16 @@ public class ElytraTarget extends Module {
         fireworkTicks++;
 
         PlayerEntity p = null;
-        if (autoTarget.getValue()) {
-            double closestDist = Double.MAX_VALUE;
-            for (Entity entity : mc.world.getEntities()) {
-                if (entity instanceof PlayerEntity player && player != mc.player && player.isAlive()) {
-                    double dist = mc.player.distanceTo(player);
-                    if (dist <= aimRange.getValue() && dist < closestDist) {
-                        closestDist = dist;
-                        p = player;
-                    }
+        double closestDist = Double.MAX_VALUE;
+        
+        for (Entity entity : mc.world.getEntities()) {
+            if (entity instanceof PlayerEntity player && player != mc.player && player.isAlive()) {
+                double dist = mc.player.distanceTo(player);
+                if (dist <= aimRange.getValue() && dist < closestDist) {
+                    closestDist = dist;
+                    p = player;
                 }
             }
-        } else if (ModuleManager.aura.target instanceof PlayerEntity auraTarget) {
-            p = auraTarget;
         }
 
         if (p != null) {
@@ -109,33 +97,16 @@ public class ElytraTarget extends Module {
 
             mc.player.setYaw(safeYaw);
             mc.player.setPitch(safePitch);
-            sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround()));
-
-            if (fwMode.is(FWMode.Swap) && dist <= 3.5 && mc.player.getAttackCooldownProgress(0.5f) >= 0.92f) {
-                int swordSlot = findSwordSlot();
-                if (swordSlot != -1) {
-                    int prevSlot = mc.player.getInventory().selectedSlot;
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                    mc.interactionManager.attackEntity(mc.player, p);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                }
-            }
         }
 
         if (autofw.getValue() && fireworkTicks >= currentDelay) {
             int fireworkSlot = findFireworkSlot();
             if (fireworkSlot != -1) {
                 int prevSlot = mc.player.getInventory().selectedSlot;
-                if (fireworkSlot < 9) {
-                    sendPacket(new UpdateSelectedSlotC2SPacket(fireworkSlot));
-                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, mc.player.getYaw(), mc.player.getPitch()));
-                    mc.execute(() -> sendPacket(new UpdateSelectedSlotC2SPacket(prevSlot)));
-                } else {
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                    sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, mc.player.getYaw(), mc.player.getPitch()));
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fireworkSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                }
+                sendPacket(new UpdateSelectedSlotC2SPacket(fireworkSlot));
+                sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, mc.player.getYaw(), mc.player.getPitch()));
+                sendPacket(new UpdateSelectedSlotC2SPacket(prevSlot));
+                
                 currentDelay = delay.getValue() + (int) (Math.random() * 3) - 1;
                 if (currentDelay < 1) currentDelay = 1;
                 fireworkTicks = 0;
@@ -144,17 +115,9 @@ public class ElytraTarget extends Module {
     }
 
     private int findFireworkSlot() {
-        for (int i = 0; i < 36; i++) {
+        for (int i = 0; i < 9; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isEmpty() && stack.getItem() instanceof FireworkRocketItem) return i;
-        }
-        return -1;
-    }
-
-    private int findSwordSlot() {
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isEmpty() && (stack.getItem() instanceof SwordItem || stack.getItem() instanceof AxeItem)) return i;
         }
         return -1;
     }
