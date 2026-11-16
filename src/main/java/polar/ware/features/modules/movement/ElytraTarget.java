@@ -10,14 +10,13 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import polar.ware.core.Managers;
+import polar.ware.core.manager.client.ModuleManager;
 import polar.ware.events.impl.PlayerUpdateEvent;
 import polar.ware.features.modules.Module;
 import polar.ware.setting.Setting;
 
 public class ElytraTarget extends Module {
 
-    public final Setting<Float>     range        = new Setting<>("Range",        100f, 10f, 300f);
     public final Setting<Float>     leadMult     = new Setting<>("LeadMult",     0.7f, 0.1f, 3.0f);
     public final Setting<Float>     delay        = new Setting<>("Delay",        5f,   1f,   20f);
     public final Setting<FireMode>  fireMode     = new Setting<>("FireMode",     FireMode.Silent);
@@ -55,78 +54,60 @@ public class ElytraTarget extends Module {
         if (fullNullCheck()) return;
         if (!mc.player.isFallFlying()) return;
 
-        PlayerEntity target = findTarget();
-        if (target == null) return;
+        if (ModuleManager.aura == null || !ModuleManager.aura.isEnabled()) return;
+        if (!(ModuleManager.aura.target instanceof PlayerEntity target)) return;
 
         // Velocity smooth
         velHistory[velIndex % VEL_SAMPLES] = target.getVelocity();
         velIndex++;
         double svx = 0, svy = 0, svz = 0;
-        int count = 0;
+        int cnt = 0;
         for (Vec3d v : velHistory) {
             if (v == null) continue;
-            svx += v.x; svy += v.y; svz += v.z;
-            count++;
+            svx += v.x; svy += v.y; svz += v.z; cnt++;
         }
-        if (count == 0) return;
-        Vec3d smoothVel = new Vec3d(svx / count, svy / count, svz / count);
+        if (cnt == 0) return;
+        Vec3d smoothVel = new Vec3d(svx / cnt, svy / cnt, svz / cnt);
 
         // Lead
-        Vec3d eyePos       = mc.player.getEyePos();
-        Vec3d targetCenter = target.getBoundingBox().getCenter();
-        Vec3d fwVel        = mc.player.getVelocity();
-        Vec3d toTarget     = targetCenter.subtract(eyePos).normalize();
-        double fwSpeed     = 1.6;
-        Vec3d fwVelVec     = new Vec3d(
-            fwVel.x + toTarget.x * fwSpeed,
-            fwVel.y + toTarget.y * fwSpeed,
-            fwVel.z + toTarget.z * fwSpeed
-        );
+        Vec3d eye    = mc.player.getEyePos();
+        Vec3d center = target.getBoundingBox().getCenter();
+        Vec3d fwVel  = mc.player.getVelocity();
+        Vec3d dir    = center.subtract(eye).normalize();
+        double fwSpd = 1.6;
+        Vec3d fwVec  = new Vec3d(fwVel.x + dir.x * fwSpd, fwVel.y + dir.y * fwSpd, fwVel.z + dir.z * fwSpd);
 
-        Vec3d leadPos = targetCenter;
+        Vec3d lead = center;
         for (int i = 0; i < 3; i++) {
-            double dx0 = leadPos.x - eyePos.x;
-            double dy0 = leadPos.y - eyePos.y;
-            double dz0 = leadPos.z - eyePos.z;
-            double d0  = Math.sqrt(dx0*dx0 + dy0*dy0 + dz0*dz0);
-            double spd = fwVelVec.length();
-            if (spd < 0.01) spd = fwSpeed;
-            double t = d0 / spd;
-            leadPos = targetCenter.add(
-                smoothVel.x * t * leadMult.getValue(),
-                smoothVel.y * t * leadMult.getValue(),
-                smoothVel.z * t * leadMult.getValue()
-            );
+            double dx = lead.x - eye.x, dy = lead.y - eye.y, dz = lead.z - eye.z;
+            double spd = fwVec.length(); if (spd < 0.01) spd = fwSpd;
+            double t = Math.sqrt(dx*dx + dy*dy + dz*dz) / spd;
+            lead = center.add(smoothVel.x * t * leadMult.getValue(),
+                              smoothVel.y * t * leadMult.getValue(),
+                              smoothVel.z * t * leadMult.getValue());
         }
 
         // Rotation
-        double dx = leadPos.x - eyePos.x;
-        double dy = leadPos.y - eyePos.y;
-        double dz = leadPos.z - eyePos.z;
-
+        double dx = lead.x - eye.x, dy = lead.y - eye.y, dz = lead.z - eye.z;
         float yaw   = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90f;
-        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx*dx + dz*dz)));
-        pitch = MathHelper.clamp(pitch, -90f, 90f);
+        float pitch = MathHelper.clamp((float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx*dx + dz*dz))), -90f, 90f);
 
-        double sens = mc.options.getMouseSensitivity().getValue();
-        double f    = sens * 0.6 + 0.2;
-        double gcd  = Math.pow(f, 3.0) * (8.0 / 3.0);
+        double f   = mc.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
+        double gcd = Math.pow(f, 3.0) * (8.0 / 3.0);
 
         float tYaw, tPitch;
         if (rotations.is(Rotations.Smooth)) {
             smoothYaw   += (yaw   - smoothYaw)   * smoothFactor.getValue();
             smoothPitch += (pitch - smoothPitch) * smoothFactor.getValue();
-            tYaw   = smoothYaw;
-            tPitch = smoothPitch;
+            tYaw = smoothYaw; tPitch = smoothPitch;
         } else {
-            tYaw   = yaw;
-            tPitch = pitch;
+            tYaw = yaw; tPitch = pitch;
         }
 
         float safeYaw   = (float)(tYaw   - (tYaw   - mc.player.getYaw())   % gcd);
         float safePitch = (float)(tPitch - (tPitch - mc.player.getPitch()) % gcd);
 
-        // Her tick rotation paketi gönder (targeting)
+        // Her tick rotation paketi
         mc.player.networkHandler.sendPacket(
             new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround())
         );
@@ -139,7 +120,6 @@ public class ElytraTarget extends Module {
         if (fwSlot == -1) return;
 
         if (fireMode.is(FireMode.Silent)) {
-            // Silent: slot paketi yok
             if (fwSlot < 9) {
                 int prev = mc.player.getInventory().selectedSlot;
                 mc.player.getInventory().selectedSlot = fwSlot;
@@ -154,13 +134,12 @@ public class ElytraTarget extends Module {
                     net.minecraft.screen.slot.SlotActionType.SWAP, mc.player);
             }
         } else {
-            // SwordSwap: fişek bas → kılıca geç
-            int swordSlot = findSwordSlot();
+            int sw = findSwordSlot();
             if (fwSlot < 9) {
                 int prev = mc.player.getInventory().selectedSlot;
                 mc.player.getInventory().selectedSlot = fwSlot;
                 sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
-                mc.player.getInventory().selectedSlot = (swordSlot >= 0 && swordSlot < 9) ? swordSlot : prev;
+                mc.player.getInventory().selectedSlot = (sw >= 0 && sw < 9) ? sw : prev;
             } else {
                 int hotbar = mc.player.getInventory().selectedSlot;
                 mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fwSlot, hotbar,
@@ -168,24 +147,11 @@ public class ElytraTarget extends Module {
                 sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
                 mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, fwSlot, hotbar,
                     net.minecraft.screen.slot.SlotActionType.SWAP, mc.player);
-                if (swordSlot >= 0 && swordSlot < 9)
-                    mc.player.getInventory().selectedSlot = swordSlot;
+                if (sw >= 0 && sw < 9) mc.player.getInventory().selectedSlot = sw;
             }
         }
 
         lastFireworkMs = System.currentTimeMillis();
-    }
-
-    private PlayerEntity findTarget() {
-        PlayerEntity closest = null;
-        double maxDist = (double) range.getValue() * range.getValue();
-        for (PlayerEntity p : mc.world.getPlayers()) {
-            if (p == mc.player) continue;
-            if (Managers.FRIEND.isFriend(p)) continue;
-            double d = mc.player.squaredDistanceTo(p);
-            if (d < maxDist) { maxDist = d; closest = p; }
-        }
-        return closest;
     }
 
     private int findFireworkSlot() {
