@@ -66,8 +66,8 @@ import static polar.ware.utility.math.MathUtility.random;
 public class Aura extends Module {
     public final Setting<Float> attackRange = new Setting<>("Range", 3.1f, 1f, 6.0f);
     public final Setting<Float> wallRange = new Setting<>("ThroughWallsRange", 3.1f, 0f, 6.0f);
-    public final Setting<Boolean> elytra = new Setting<>("ElytraOverride",false);
-    public final Setting<Float> elytraAttackRange = new Setting<>("ElytraRange", 3.1f, 1f, 6.0f, v -> elytra.getValue());
+    public final Setting<Boolean> elytra = new Setting<>("ElytraOverride", true);
+    public final Setting<Float> elytraAttackRange = new Setting<>("ElytraRange", 32f, 1f, 64f, v -> elytra.getValue());
     public final Setting<Float> elytraWallRange = new Setting<>("ElytraThroughWallsRange", 3.1f, 0f, 6.0f,v -> elytra.getValue());
     public final Setting<WallsBypass> wallsBypass = new Setting<>("WallsBypass", WallsBypass.Off, v -> getWallRange() > 0);
     public final Setting<Integer> fov = new Setting<>("FOV", 180, 1, 180);
@@ -664,6 +664,10 @@ public class Aura extends Module {
         if (ModuleManager.strafe.isEnabled()) dst += 4f;
         if (rotationMode.getValue() != Mode.Track || rayTrace.getValue() == RayTrace.OFF)
             dst = getRange();
+
+        // Elytra açıkken ElytraRange'in tam olarak geçerli olmasını sağla
+        if (elytra.getValue() && mc.player != null && mc.player.isFallFlying())
+            dst = Math.max(dst, elytraAttackRange.getValue());
 
         return dst * dst;
     }
