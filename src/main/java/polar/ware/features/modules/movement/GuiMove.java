@@ -1,4 +1,4 @@
-package thunder.hack.features.modules.movement;
+package polar.ware.features.modules.movement;
 
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.ChatScreen;
@@ -9,11 +9,11 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
-import thunder.hack.events.impl.EventClickSlot;
-import thunder.hack.events.impl.PacketEvent;
-import thunder.hack.features.modules.Module;
-import thunder.hack.setting.Setting;
-import thunder.hack.utility.player.MovementUtility;
+import polar.ware.events.impl.EventClickSlot;
+import polar.ware.events.impl.PacketEvent;
+import polar.ware.features.modules.Module;
+import polar.ware.setting.Setting;
+import polar.ware.utility.player.MovementUtility;
 
 import java.util.LinkedList;
 import java.util.Queue;
