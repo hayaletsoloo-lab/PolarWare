@@ -164,7 +164,24 @@ private float getRange() {
 private float getWallRange() {
     return elytra.getValue() && mc.player != null && mc.player.isFallFlying() ? elytraWallRange.getValue() : wallRange.getValue();
 }
+public void resolvePlayers() {
+    if (resolver.not(Resolver.Off))
+        for (PlayerEntity player : mc.world.getPlayers())
+            if (player instanceof OtherClientPlayerEntity)
+                ((IOtherClientPlayerEntity) player).resolve(resolver.getValue());
+}
 
+public void restorePlayers() {
+    if (resolver.not(Resolver.Off))
+        for (PlayerEntity player : mc.world.getPlayers())
+            if (player instanceof OtherClientPlayerEntity)
+                ((IOtherClientPlayerEntity) player).releaseResolver();
+}
+
+public void handleKill() {
+    if (target instanceof LivingEntity && (((LivingEntity) target).getHealth() <= 0 || ((LivingEntity) target).isDead()))
+        Managers.NOTIFICATION.publicity("Aura", isRu() ? "Цель успешно нейтрализована!" : "Target successfully neutralized!", 3, Notification.Type.SUCCESS);
+}
 public void auraLogic() {
     if (!haveWeapon()) {
         target = null;
@@ -352,7 +369,7 @@ public void onUpdate(PlayerUpdateEvent e) {
     }
 
     public float getAttackCooldownProgressPerTick() {
-        return (float) (1.0 / mc.player.getAttributeValue(EntityAttributes.GENERIC_ATTACK_SPEED) * (20.0 * PolarWare.TICK_TIMER * (tpsSync.getValue() ? Managers.SERVER.getTPSFactor() : 1f)));
+    return (float) (1.0 / mc.player.getAttributeValue(EntityAttributes.GENERIC_ATTACK_SPEED) * 20.0 * 1.0f);
     }
 
     public float getAttackCooldown() {
