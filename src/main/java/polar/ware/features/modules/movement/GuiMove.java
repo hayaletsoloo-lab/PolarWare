@@ -29,24 +29,40 @@ public class GuiMove extends Module {
 
     @Override
     public void onUpdate() {
-        // [FUNTIME BYPASS] - Envanter kapandıktan sonra paketleri gecikmeli gönder
+        // [FUNTIME BYPASS] - Envanter kapandıktan sonra 0.5 saniye bekle
         if (funTimeDelay > 0) {
             funTimeDelay--;
             
-            // Sunucu paketleri işlerken karakterin hareket etmesini engelle
-            for (KeyBinding k : new KeyBinding[]{mc.options.forwardKey, mc.options.backKey, mc.options.leftKey, mc.options.rightKey, mc.options.jumpKey}) {
-                k.setPressed(false);
-            }
+            // Bekleme süresince hareketi tamamen engelle (Ayağın yere bassın)
+            mc.options.forwardKey.setPressed(false);
+            mc.options.backKey.setPressed(false);
+            mc.options.leftKey.setPressed(false);
+            mc.options.rightKey.setPressed(false);
+            mc.options.jumpKey.setPressed(false);
+            mc.options.sprintKey.setPressed(false);
             
             if (funTimeDelay == 0) {
-                // Tıklamaları sırayla gönder
+                // 0.5 saniye bitti, tıklamaları ve envanter kapatma paketini gönder
                 while (!funTimeQueue.isEmpty()) {
                     sendPacket(funTimeQueue.poll());
                 }
-                // En son envanteri kapat
                 if (queuedClose != null) {
                     sendPacket(queuedClose);
                     queuedClose = null;
+                }
+                
+                // [ÇÖZÜM BURADA] - Sunucu paketleri aldıktan sonra tuşları senin yerine tekrar bas
+                long handle = mc.getWindow().getHandle();
+                if (InputUtil.isKeyPressed(handle, mc.options.forwardKey.getDefaultKey().getCode())) mc.options.forwardKey.setPressed(true);
+                if (InputUtil.isKeyPressed(handle, mc.options.backKey.getDefaultKey().getCode())) mc.options.backKey.setPressed(true);
+                if (InputUtil.isKeyPressed(handle, mc.options.leftKey.getDefaultKey().getCode())) mc.options.leftKey.setPressed(true);
+                if (InputUtil.isKeyPressed(handle, mc.options.rightKey.getDefaultKey().getCode())) mc.options.rightKey.setPressed(true);
+                if (InputUtil.isKeyPressed(handle, mc.options.jumpKey.getDefaultKey().getCode())) mc.options.jumpKey.setPressed(true);
+                
+                // Eğer W'ye basılıyorsa direkt koşmayı (sprint) da geri aç
+                if (mc.options.forwardKey.isPressed() && !mc.player.isSneaking()) {
+                    mc.options.sprintKey.setPressed(true);
+                    mc.player.setSprinting(true);
                 }
             }
             return;
@@ -88,10 +104,10 @@ public class GuiMove extends Module {
         }
 
         if (e.getPacket() instanceof CloseHandledScreenC2SPacket close) {
-            // [FUNTIME BYPASS] - Envanteri kapatma isteğini iptal et, 3 tick (150ms) geciktir
+            // [FUNTIME BYPASS] - Envanteri kapatma isteğini iptal et, 10 tick (0.5 saniye) geciktir
             queuedClose = close;
             e.cancel();
-            funTimeDelay = 3; 
+            funTimeDelay = 10; 
         }
     }
 }
