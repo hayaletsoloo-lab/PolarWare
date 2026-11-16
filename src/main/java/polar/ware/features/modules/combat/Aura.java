@@ -69,6 +69,7 @@ public class Aura extends Module {
     public final Setting<Boolean> elytra = new Setting<>("ElytraOverride", true);
     public final Setting<Float> elytraAttackRange = new Setting<>("ElytraRange", 32f, 1f, 64f, v -> elytra.getValue());
     public final Setting<Float> elytraWallRange = new Setting<>("ElytraThroughWallsRange", 3.1f, 0f, 6.0f,v -> elytra.getValue());
+    public final Setting<Float> elytraAimRange = new Setting<>("ElytraAimRange", 50f, 1f, 64f, v -> elytra.getValue());
     public final Setting<WallsBypass> wallsBypass = new Setting<>("WallsBypass", WallsBypass.Off, v -> getWallRange() > 0);
     public final Setting<Integer> fov = new Setting<>("FOV", 180, 1, 180);
     public final Setting<Mode> rotationMode = new Setting<>("RotationMode", Mode.Track);
