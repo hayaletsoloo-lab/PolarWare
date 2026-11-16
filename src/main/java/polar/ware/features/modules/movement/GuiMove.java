@@ -1,4 +1,4 @@
-package polar.ware.features.modules.movement;
+package thunder.hack.features.modules.movement;
 
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.ChatScreen;
@@ -9,11 +9,11 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
-import polar.ware.events.impl.EventClickSlot;
-import polar.ware.events.impl.PacketEvent;
-import polar.ware.features.modules.Module;
-import polar.ware.setting.Setting;
-import polar.ware.utility.player.MovementUtility;
+import thunder.hack.events.impl.EventClickSlot;
+import thunder.hack.events.impl.PacketEvent;
+import thunder.hack.features.modules.Module;
+import thunder.hack.setting.Setting;
+import thunder.hack.utility.player.MovementUtility;
 
 import java.util.LinkedList;
 import java.util.Queue;
@@ -35,9 +35,15 @@ public class GuiMove extends Module {
     private int polarClickDelay = 0;
     private boolean polarWasSprinting = false;
 
+    // [LEGIT MODE] state
+    private final Queue<ClickSlotC2SPacket> legitClicks = new LinkedList<>();
+    private boolean isLegitReplaying = false;
+    private int legitReplayTick = 0;
+    private boolean legitWasSprinting = false;
+
     @Override
     public void onUpdate() {
-        // [POLAR BYPASS] Polar mod: delayed click flush — her tick say, sıfırda gönder
+        // [POLAR BYPASS] Polar mod: delayed click flush
         if (clickBypass.is(Bypass.Polar) && polarClickDelay > 0) {
             polarClickDelay--;
             if (polarClickDelay == 0 && !storedClicks.isEmpty()) {
@@ -45,12 +51,36 @@ public class GuiMove extends Module {
                 while (!storedClicks.isEmpty())
                     sendPacket(storedClicks.poll());
                 pause.set(false);
-                // [POLAR BYPASS] Sprint restore — click gittikten sonra sprint geri aç
                 if (polarWasSprinting) {
                     mc.player.setSprinting(true);
                     sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SPRINTING));
                 }
             }
+        }
+
+        // [LEGIT MODE] - Envanter kapandıktan sonra tıklamaları sırayla sunucuya gönder
+        if (clickBypass.is(Bypass.Legit) && isLegitReplaying) {
+            if (legitReplayTick > 0) {
+                legitReplayTick--;
+            } else {
+                if (!legitClicks.isEmpty()) {
+                    // Tıklamayı sunucuya yolla
+                    sendPacket(legitClicks.poll());
+                    // İnsan gibi görünmesi için tıklamalar arasına 1-2 tick rastgele gecikme koy
+                    legitReplayTick = 1 + (int) (Math.random() * 2);
+                } else {
+                    // Tüm tıklamalar bitti, envanteri kapat
+                    sendPacket(new CloseHandledScreenC2SPacket(mc.player.currentScreenHandler.syncId));
+                    isLegitReplaying = false;
+                    
+                    // Sprint'i geri aç
+                    if (legitWasSprinting) {
+                        mc.player.setSprinting(true);
+                        sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SPRINTING));
+                    }
+                }
+            }
+            return; // Replay sırasında diğer tuş okumalarını engelle
         }
 
         if (mc.currentScreen != null && !(mc.currentScreen instanceof ChatScreen)) {
@@ -63,13 +93,10 @@ public class GuiMove extends Module {
             if (rotateOnArrows.getValue()) {
                 if (isKeyPressed(264))
                     deltaY += 30f;
-
                 if (isKeyPressed(265))
                     deltaY -= 30f;
-
                 if (isKeyPressed(262))
                     deltaX += 30f;
-
                 if (isKeyPressed(263))
                     deltaX -= 30f;
 
@@ -93,12 +120,18 @@ public class GuiMove extends Module {
         if (pause.get()) return;
 
         if (e.getPacket() instanceof ClickSlotC2SPacket click) {
+            
+            // [LEGIT MODE] - Tıklamaları direkt gönderme, kuyruğa ekle
+            if (clickBypass.is(Bypass.Legit)) {
+                legitClicks.add(click);
+                e.cancel();
+                return;
+            }
+
             // Polar: hareket/jump şartı yok, her zaman intercept et
             if (clickBypass.is(Bypass.Polar)) {
                 polarWasSprinting = mc.player.isSprinting();
                 if (polarWasSprinting) {
-                    // [POLAR BYPASS] STOP_SPRINTING paketi değil — sadece client-side sprint kapat
-                    // Sonra sunucuya tek bir position paketi ile "duruyorum" dedirt
                     mc.player.setSprinting(false);
                     sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
                         mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.isOnGround()
@@ -118,7 +151,6 @@ public class GuiMove extends Module {
                     if (click.getActionType() != SlotActionType.PICKUP && click.getActionType() != SlotActionType.PICKUP_ALL)
                         sendPacket(new CloseHandledScreenC2SPacket(0));
                 }
-
                 case StrictNCP -> {
                     if (mc.player.isOnGround() && !mc.world.getBlockCollisions(mc.player, mc.player.getBoundingBox().offset(0.0, 0.0656, 0.0)).iterator().hasNext()) {
                         if (mc.player.isSprinting())
@@ -126,7 +158,6 @@ public class GuiMove extends Module {
                         sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(mc.player.getX(), mc.player.getY() + 0.0656, mc.player.getZ(), false));
                     }
                 }
-
                 case StrictNCP2 -> {
                     if (mc.player.isOnGround() && !mc.world.getBlockCollisions(mc.player, mc.player.getBoundingBox().offset(0.0, 0.000000271875, 0.0)).iterator().hasNext()) {
                         if (mc.player.isSprinting())
@@ -134,24 +165,42 @@ public class GuiMove extends Module {
                         sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(mc.player.getX(), mc.player.getY() + 0.000000271875, mc.player.getZ(), false));
                     }
                 }
-
                 case MatrixNcp -> {
                     sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
                     mc.options.forwardKey.setPressed(false);
                     mc.player.input.movementForward = 0;
                     mc.player.input.pressingForward = false;
                 }
-
                 case Delay -> {
                     storedClicks.add(click);
                     e.cancel();
                 }
-
-
             }
         }
 
         if (e.getPacket() instanceof CloseHandledScreenC2SPacket) {
+            
+            // [LEGIT MODE] - Envanter kapatılırken tıklamaları bekleterek replays başlat
+            if (clickBypass.is(Bypass.Legit)) {
+                e.cancel();
+                if (!legitClicks.isEmpty()) {
+                    isLegitReplaying = true;
+                    legitReplayTick = 2; // İlk tıklamadan önce 2 tick bekle
+                    
+                    legitWasSprinting = mc.player.isSprinting();
+                    if (legitWasSprinting) {
+                        mc.player.setSprinting(false);
+                        sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
+                    }
+                    
+                    // Anlık durduğunu sunucuya bildir
+                    sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                        mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.isOnGround()
+                    ));
+                }
+                return;
+            }
+
             if (clickBypass.is(Bypass.Delay)) {
                 pause.set(true);
                 while (!storedClicks.isEmpty())
@@ -170,6 +219,6 @@ public class GuiMove extends Module {
     }
 
     private enum Bypass {
-        DisableClicks, None, StrictNCP, GrimSwap, MatrixNcp, Delay, StrictNCP2, Polar
+        DisableClicks, None, StrictNCP, GrimSwap, MatrixNcp, Delay, StrictNCP2, Polar, Legit
     }
 }
