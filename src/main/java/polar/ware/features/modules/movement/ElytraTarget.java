@@ -1,6 +1,7 @@
-package polar.ware.features.modules.movement; // Eğer combat klasöründe tutuyorsan burayı combat yap
+package polar.ware.features.modules.movement;
 
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.FireworkRocketItem;
 import net.minecraft.item.ItemStack;
@@ -11,23 +12,21 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import polar.ware.events.impl.PlayerUpdateEvent;
 import polar.ware.features.modules.Module;
-import polar.ware.core.manager.client.ModuleManager;
 import polar.ware.setting.Setting;
 
 public class ElytraTarget extends Module {
 
     // ── Settings ────────────────────────────────────────────────────────────
-    public final Setting<Float>   minRange     = new Setting<>("MinRange",     20f, 1f,  100f);
-    public final Setting<Float>   maxRange     = new Setting<>("MaxRange",     100f, 1f, 100f);
+    public final Setting<Float>   minRange     = new Setting<>("MinRange",     3f, 1f,  100f);
+    public final Setting<Float>   maxRange     = new Setting<>("MaxRange",     60f, 1f, 100f);
     public final Setting<Float>   leadMult     = new Setting<>("LeadMult",     0.7f, 0.1f, 3.0f);
     public final Setting<Float>   delay        = new Setting<>("Delay", 5f, 1f, 20f);
-    public final Setting<Boolean> snap         = new Setting<>("Snap", true); // Ghost Hit Engeli
+    public final Setting<Boolean> snap         = new Setting<>("Snap", true);
     public final Setting<Rotations> rotations  = new Setting<>("Rotations", Rotations.Sharp);
     public final Setting<Float>   smoothFactor = new Setting<>("SmoothFactor", 0.35f, 0.05f, 1.0f, v -> rotations.is(Rotations.Smooth));
 
     private enum Rotations { Sharp, Smooth }
 
-    // ── State ────────────────────────────────────────────────────────────────
     private long lastFireworkMs = 0L;
     private float smoothYaw   = 0f;
     private float smoothPitch = 0f;
@@ -37,7 +36,7 @@ public class ElytraTarget extends Module {
     private int velIndex = 0;
 
     public ElytraTarget() {
-        super("ElytraTarget", Category.MOVEMENT); // Combat ise Category.COMBAT yap
+        super("ElytraTarget", Category.MOVEMENT);
     }
 
     @Override
@@ -52,22 +51,34 @@ public class ElytraTarget extends Module {
 
     @EventHandler
     public void onUpdate(PlayerUpdateEvent e) {
-        if (!mc.player.isFallFlying()) return;
-        if (ModuleManager.aura == null || !ModuleManager.aura.isEnabled()) return;
+        // Sadece sen uçarken çalış (yerdeyken fişek basmanın anlamı yok)
+        if (!mc.player.isFallFlying() || mc.currentScreen != null) return;
+
+        // ── KENDİ HEDEFİNİ BUL (Aura'dan Bağımsız) ──
+        PlayerEntity target = null;
+        double closestDist = Double.MAX_VALUE;
         
-        var target = ModuleManager.aura.target;
-        if (!(target instanceof PlayerEntity)) return;
+        for (Entity entity : mc.world.getEntities()) {
+            // Uçan veya uçmayan tüm oyuncuları hedef alır (p.isFallFlying kontrolü YOK)
+            if (entity instanceof PlayerEntity p && p != mc.player && p.isAlive()) {
+                double dist = mc.player.distanceTo(p);
+                if (dist >= minRange.getValue() && dist <= maxRange.getValue() && dist < closestDist) {
+                    closestDist = dist;
+                    target = p;
+                }
+            }
+        }
 
-        double dist = mc.player.distanceTo(target);
-        if (dist < minRange.getValue() || dist > maxRange.getValue()) return;
+        if (target == null) return;
 
+        // ── Delay Kontrolü ──
         long now = System.currentTimeMillis();
         if (now - lastFireworkMs < (long)(delay.getValue() * 100)) return;
 
         int fireworkSlot = findFireworkSlot();
         if (fireworkSlot == -1) return;
 
-        // ── Velocity smooth ──────────────────────────────────────────────────
+        // ── Velocity smooth ──
         velHistory[velIndex % VEL_SAMPLES] = target.getVelocity();
         velIndex++;
         double svx = 0, svy = 0, svz = 0;
@@ -108,9 +119,8 @@ public class ElytraTarget extends Module {
             );
         }
 
-        // ── [SNAP EKLENTİSİ] ─────────────────────────────────────────────────
-        // Eğer adama 3.5 bloktan yakınsak, önüne geçmeyi bırak, direkt adama odaklan (Ghost Hit engeli)
-        Vec3d finalLookPos = (snap.getValue() && dist <= 3.5) ? targetCenter : leadPos;
+        // ── SNAP ──
+        Vec3d finalLookPos = (snap.getValue() && closestDist <= 3.5) ? targetCenter : leadPos;
 
         double dx = finalLookPos.x - eyePos.x;
         double dy = finalLookPos.y - eyePos.y;
@@ -138,7 +148,7 @@ public class ElytraTarget extends Module {
         float safeYaw   = (float)(targetYaw   - (targetYaw   - mc.player.getYaw())   % gcd);
         float safePitch = (float)(targetPitch - (targetPitch - mc.player.getPitch()) % gcd);
 
-        // Silent fişek
+        // Silent Fişek
         if (fireworkSlot < 9) {
             mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(fireworkSlot));
             sendSequencedPacket(id -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, id, safeYaw, safePitch));
@@ -161,6 +171,10 @@ public class ElytraTarget extends Module {
                 mc.player
             );
         }
+
+        // Rotasyonu uygula
+        mc.player.setYaw(safeYaw);
+        mc.player.setPitch(safePitch);
 
         lastFireworkMs = System.currentTimeMillis();
     }
