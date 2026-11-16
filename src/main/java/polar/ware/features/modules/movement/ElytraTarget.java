@@ -7,6 +7,7 @@ import net.minecraft.item.AxeItem;
 import net.minecraft.item.FireworkRocketItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.SwordItem;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
@@ -19,7 +20,8 @@ import polar.ware.setting.Setting;
 public class ElytraTarget extends Module {
     
     public final Setting<Boolean> autofw = new Setting<>("AutoFW", true);
-    public final Setting<FWMode> fwMode = new Setting<>("FWMode", FWMode.Silent);
+    public final Setting<FWMode> fwMode = new Setting<>("FWMode", FWMode.Swap);
+    public final Setting<Boolean> snapOnHit = new Setting<>("SnapOnHit", true); // [YENİ]
     public final Setting<Integer> delay = new Setting<>("Delay", 4, 1, 20);
     public final Setting<Float> predict = new Setting<>("Predict", 1.5f, 0.5f, 4.0f);
     public final Setting<Float> aimRange = new Setting<>("AimRange", 50f, 20f, 64f);
@@ -56,15 +58,13 @@ public class ElytraTarget extends Module {
         fireworkTicks++;
         if (!autofw.getValue()) return;
 
-        // --- SADECE KENDİ HEDEFİNİ BUL (AURA'DAN BAĞIMSIZ) ---
+        // --- HEDEF BULMA (Sadece uçan oyuncular) ---
         PlayerEntity target = null;
         double closestDist = Double.MAX_VALUE;
         
         for (Entity entity : mc.world.getEntities()) {
-            // Sadece uçan (Elytra açık) oyuncuları hedef al
             if (entity instanceof PlayerEntity p && p != mc.player && p.isAlive() && p.isFallFlying()) {
                 double dist = mc.player.distanceTo(p);
-                // Belirlediğin AimRange (örneğin 50 blok) içindeyse hedefle
                 if (dist <= aimRange.getValue() && dist < closestDist) {
                     closestDist = dist;
                     target = p;
@@ -74,27 +74,7 @@ public class ElytraTarget extends Module {
 
         if (target == null) return;
 
-        // --- SWAP MODU: 3.5 Blok Yaklaşınca Kılıçla Vur ---
-        if (fwMode.is(FWMode.Swap) && closestDist <= 3.5) {
-            if (mc.player.getAttackCooldownProgress(0.5f) >= 0.92f) {
-                int swordSlot = findSwordSlot();
-                if (swordSlot != -1) {
-                    int prevSlot = mc.player.getInventory().selectedSlot;
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                    mc.interactionManager.attackEntity(mc.player, target);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
-                }
-            }
-        }
-
-        // --- FİŞEK BASMA ---
-        if (fireworkTicks < currentDelay) return;
-
-        int fireworkSlot = findFireworkSlot();
-        if (fireworkSlot == -1) return;
-
-        // --- HIZ TAHMİNİ (PREDICT) ---
+        // --- ROTASYON HESABI (PREDICT / ÖNÜNE GEÇME) ---
         velHistory[velIndex % 5] = target.getVelocity();
         velIndex++;
         double svx = 0, svy = 0, svz = 0;
@@ -106,19 +86,16 @@ public class ElytraTarget extends Module {
         
         double dist = eyePos.distanceTo(targetCenter);
         double travelTime = dist / 1.6;
+        
+        // Önüne geçme noktası (LeadPos)
         Vec3d leadPos = targetCenter.add(
             smoothVel.x * travelTime * predict.getValue(),
             smoothVel.y * travelTime * predict.getValue(),
             smoothVel.z * travelTime * predict.getValue()
         );
 
-        // --- ROTASYON HESABI ---
-        double dx = leadPos.x - eyePos.x;
-        double dy = leadPos.y - eyePos.y;
-        double dz = leadPos.z - eyePos.z;
-        
-        float targetYaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90f;
-        float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+        float targetYaw = (float) Math.toDegrees(Math.atan2(leadPos.z - eyePos.z, leadPos.x - eyePos.x)) - 90f;
+        float targetPitch = (float) -Math.toDegrees(Math.atan2(leadPos.y - eyePos.y, Math.sqrt(Math.pow(leadPos.x - eyePos.x, 2) + Math.pow(leadPos.z - eyePos.z, 2))));
         targetPitch = MathHelper.clamp(targetPitch, -90f, 90f);
 
         double sens = mc.options.getMouseSensitivity().getValue();
@@ -135,11 +112,58 @@ public class ElytraTarget extends Module {
         float safeYaw = (float) (targetYaw - (targetYaw - mc.player.getYaw()) % gcd);
         float safePitch = (float) (targetPitch - (targetPitch - mc.player.getPitch()) % gcd);
 
-        // Rotasyonu zorla
+        // Rotasyonu uygula (Önüne geçme rotasyonu)
         mc.player.setYaw(safeYaw);
         mc.player.setPitch(safePitch);
 
-        // --- SESSİZ FİŞEK ---
+        // --- SWAP MODU: VURUŞ VE ANLIK KİLİT (SNAP) ---
+        if (fwMode.is(FWMode.Swap) && closestDist <= 3.5) {
+            if (mc.player.getAttackCooldownProgress(0.5f) >= 0.92f) {
+                int swordSlot = findSwordSlot();
+                if (swordSlot != -1) {
+                    int prevSlot = mc.player.getInventory().selectedSlot;
+                    
+                    // 1. Kılıcı sessizce eline al
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
+
+                    // 2. [POLAR BYPASS] Eğer SnapOnHit açıksa, kafayı anlık olarak adama kilitlet
+                    if (snapOnHit.getValue()) {
+                        // Gerçek hedefe bakış açısını hesapla
+                        float realYaw = (float) Math.toDegrees(Math.atan2(targetCenter.z - eyePos.z, targetCenter.x - eyePos.x)) - 90f;
+                        float realPitch = (float) -Math.toDegrees(Math.atan2(targetCenter.y - eyePos.y, Math.sqrt(Math.pow(targetCenter.x - eyePos.x, 2) + Math.pow(targetCenter.z - eyePos.z, 2))));
+                        
+                        float safeRealYaw = (float) (realYaw - (realYaw - mc.player.getYaw()) % gcd);
+                        float safeRealPitch = (float) (realPitch - (realPitch - mc.player.getPitch()) % gcd);
+
+                        // Sunucuya "adama bakıyorum" paketi gönder
+                        mc.player.setYaw(safeRealYaw);
+                        mc.player.setPitch(safeRealPitch);
+                        sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(safeRealYaw, safeRealPitch, mc.player.isOnGround()));
+                    }
+
+                    // 3. Vur
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+
+                    // 4. [POLAR BYPASS] Vurduktan hemen sonra eski "önüne geçme" rotasyonuna geri dön
+                    if (snapOnHit.getValue()) {
+                        mc.player.setYaw(safeYaw);
+                        mc.player.setPitch(safePitch);
+                        sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(safeYaw, safePitch, mc.player.isOnGround()));
+                    }
+
+                    // 5. Fişeğe geri dön
+                    mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, swordSlot, prevSlot, SlotActionType.SWAP, mc.player);
+                }
+            }
+        }
+
+        // --- FİŞEK BASMA ---
+        if (fireworkTicks < currentDelay) return;
+
+        int fireworkSlot = findFireworkSlot();
+        if (fireworkSlot == -1) return;
+
         int prevSlot = mc.player.getInventory().selectedSlot;
         
         if (fireworkSlot < 9) {
