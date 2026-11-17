@@ -122,6 +122,7 @@ public class ModuleManager implements IManager {
     public static FpsCounter fpsCounter = new FpsCounter();
     public static FakePlayer fakePlayer = new FakePlayer();
     public static ElytraSwap elytraSwap = new ElytraSwap();
+    public static ElytraHelper elytraHelper = new ElytraHelper();
     public static ElytraPlus elytraPlus = new ElytraPlus();
     public static AutoSprint autoSprint = new AutoSprint();
     public static AutoGApple autoGApple = new AutoGApple();
