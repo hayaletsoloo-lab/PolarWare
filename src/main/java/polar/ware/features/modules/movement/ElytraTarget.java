@@ -48,6 +48,16 @@ public class ElytraTarget extends Module {
         fireworkTicks++;
 
         if (autofw.getValue() && state == 0 && fireworkTicks >= currentDelay) {
+            
+            if (mc.player.getOffHandStack().getItem() instanceof FireworkRocketItem) {
+                mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
+                mc.player.swingHand(Hand.OFF_HAND);
+                currentDelay = delay.getValue() + (int) (Math.random() * 3) - 1;
+                if (currentDelay < 1) currentDelay = 1;
+                fireworkTicks = 0;
+                return;
+            }
+
             int fireworkSlot = findFireworkSlot();
             if (fireworkSlot != -1) {
                 if (mode.getValue() == Mode.Silent) {
